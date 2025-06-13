@@ -1,0 +1,77 @@
+import os
+import glob
+import pickle
+from typing import List
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.docstore.document import Document
+from langchain.embeddings import HuggingFaceEmbeddings
+
+from PyPDF2 import PdfReader
+
+
+# Caminhos
+DOCS_DIR = "data/documentos/"
+INDEX_DIR = "faiss_index/"
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def carregar_texto_dos_pdfs(pasta: str) -> List[Document]:
+    documentos = []
+    arquivos_pdf = glob.glob(os.path.join(pasta, "*.pdf"))
+
+    for caminho in arquivos_pdf:
+        leitor = PdfReader(caminho)
+        texto = ""
+        for pagina in leitor.pages:
+            texto += pagina.extract_text() or ""
+        documentos.append(Document(page_content=texto, metadata={"source": os.path.basename(caminho)}))
+
+    return documentos
+
+
+def carregar_texto_dos_txts(pasta: str) -> List[Document]:
+    documentos = []
+    arquivos_txt = glob.glob(os.path.join(pasta, "*.txt"))
+
+    for caminho in arquivos_txt:
+        with open(caminho, "r", encoding="utf-8") as f:
+            texto = f.read()
+        documentos.append(Document(page_content=texto, metadata={"source": os.path.basename(caminho)}))
+
+    return documentos
+
+
+def quebrar_documentos(documentos: List[Document]) -> List[Document]:
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    return splitter.split_documents(documentos)
+
+
+def criar_index(docs_chunkados: List[Document], modelo_embedding) -> None:
+    print("[INFO] Criando índice vetorial com FAISS...")
+    faiss_index = FAISS.from_documents(docs_chunkados, modelo_embedding)
+    faiss_index.save_local(INDEX_DIR)
+    print(f"[INFO] Índice salvo em {INDEX_DIR}")
+
+
+def main():
+    print("[INFO] Carregando documentos...")
+    docs_pdf = carregar_texto_dos_pdfs(DOCS_DIR)
+    docs_txt = carregar_texto_dos_txts(DOCS_DIR)
+
+    documentos = docs_pdf + docs_txt
+    print(f"[INFO] {len(documentos)} documentos carregados.")
+
+    print("[INFO] Quebrando documentos em chunks...")
+    chunks = quebrar_documentos(documentos)
+    print(f"[INFO] {len(chunks)} chunks gerados.")
+
+    print("[INFO] Carregando modelo de embeddings...")
+    embedding_model = HuggingFaceEmbeddings(model_name=MODEL_NAME)
+
+    criar_index(chunks, embedding_model)
+
+
+if __name__ == "__main__":
+    main()
